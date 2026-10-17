@@ -19,16 +19,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Unpack project from zip (optional)
+      - name: Unpack project to repo root
+        shell: bash
         run: |
+          set -euo pipefail
           if [ -f project.zip ]; then
             unzip -o project.zip -d /tmp/project
-            if [ -d /tmp/project/project ]; then SRC="/tmp/project/project"; else SRC="/tmp/project"; fi
-            rsync -a --delete --exclude '.git' --exclude '.github' "$SRC/". ./
+            ROOT_DIR="$(dirname "$(find /tmp/project -maxdepth 3 -type f \( -name settings.gradle -o -name settings.gradle.kts \) | head -n1 || true)")"
+            if [ -z "${ROOT_DIR:-}" ]; then
+              echo "No settings.gradle(.kts) found in project.zip"; exit 1
+            fi
+            echo "Detected project root: $ROOT_DIR"
+            rsync -a --delete --exclude '.git' --exclude '.github' "$ROOT_DIR/". ./
             ls -la
-            test -f settings.gradle -o -f settings.gradle.kts || (echo "settings.gradle missing"; exit 1)
-            test -f app/build.gradle -o -f app/build.gradle.kts || (echo "app/build.gradle missing"; exit 1)
           fi
+          test -f settings.gradle -o -f settings.gradle.kts || (echo "settings.gradle missing at repo root"; exit 1)
+          test -f app/build.gradle -o -f app/build.gradle.kts || (echo "app/build.gradle missing"; exit 1)
 
       - name: Setup Java 17
         uses: actions/setup-java@v5
@@ -38,7 +44,9 @@ jobs:
           cache: gradle
 
       - name: Prepare Android cmdline-tools
+        shell: bash
         run: |
+          set -euo pipefail
           sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           sudo chown -R $USER:$USER "$ANDROID_SDK_ROOT"
           curl -sSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
@@ -51,8 +59,7 @@ jobs:
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
 
       - name: Accept Android SDK licenses
-        run: |
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
 
       - name: Install Android SDK packages
         run: |
@@ -65,7 +72,9 @@ jobs:
           arguments: assembleRelease
 
       - name: Guard: fail if APK too small
+        shell: bash
         run: |
+          set -euo pipefail
           APK=$(ls -1 app/build/outputs/apk/release/*.apk 2>/dev/null | head -n1 || true)
           [ -n "$APK" ] || (echo "No release APK produced"; exit 1)
           SIZE=$(stat -c%s "$APK")
@@ -86,4 +95,3 @@ jobs:
           files: app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
