@@ -1,14 +1,10 @@
-
 name: build-apk
-
 on:
   push:
   workflow_dispatch:
-
 permissions:
   contents: write
   actions: write
-
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -17,11 +13,9 @@ jobs:
         shell: bash
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
     steps:
       - name: "Checkout"
         uses: actions/checkout@v5
-
       - name: "Unpack project and detect toolchain"
         id: unpack
         run: |
@@ -39,7 +33,6 @@ jobs:
           if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
             echo "settings.gradle missing at repo root"; exit 1
           fi
-
           GRADLE_VER=""
           GW_PROPS="$(find . -name gradle-wrapper.properties -type f | head -n1 || true)"
           if [ -n "${GW_PROPS:-}" ]; then
@@ -48,38 +41,33 @@ jobs:
               GRADLE_VER="$(echo "$DIST" | sed -E 's/^gradle-([0-9.]+)-.*\.zip$/\1/')"
             fi
           fi
-
-          AGP_FULL="$(grep -Rho --include='*.gradle' --include='*.gradle.kts' --include='*.toml' -E 'com.android.tools.build:gradle:[0-9]+(\.[0-9]+)*' . | head -n1 | sed -E 's/.*:gradle://' || true)"
+          AGP_FULL="$(grep -Rho --include='*.gradle' --include='*.gradle.kts' --include='*.toml' -E 'com.android.tools.build:gradle:[0-9]+(\.[0-9]+)*' . | head -n1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1 || true)"
           if [ -z "${AGP_FULL:-}" ]; then
-            AGP_FULL="$(grep -Rho --include='*.gradle' --include='*.gradle.kts' -E "com.android.application[\"')]* +version +[\"']?[0-9]+(\.[0-9]+)*" . | head -n1 | sed -E "s/.*[^0-9]([0-9]+(\.[0-9]+)*)$/\1/" || true)"
+            AGP_FULL="$(grep -Rho --include='*.gradle' --include='*.gradle.kts' -E "com.android.application[\"')]* +version +[\"']?[0-9]+(\.[0-9]+)*" . | head -n1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1 || true)"
           fi
           if [ -z "${AGP_FULL:-}" ]; then
-            AGP_FULL="$(grep -Rho --include='*.toml' -E "agp *= *[\"']?[0-9]+(\.[0-9]+)*" . | head -n1 | sed -E "s/.*[^0-9.]([0-9]+(\.[0-9]+)*).*/\1/" || true)"
+            AGP_FULL="$(grep -Rho --include='*.toml' -E "agp *= *[\"']?[0-9]+(\.[0-9]+)*" . | head -n1 | grep -oE '[0-9]+(\.[0-9]+)+' | head -n1 || true)"
           fi
           echo "Detected AGP: ${AGP_FULL:-none}"
-
           AGP_MAJOR="${AGP_FULL%%.*}"
           if [ -z "${AGP_MAJOR:-}" ]; then AGP_MAJOR=8; fi
           case "$AGP_MAJOR" in
             9) JAVA_VER=17; DEFAULT_GRADLE=9.0.0 ;;
             8) JAVA_VER=17; DEFAULT_GRADLE=8.14.3 ;;
             7) JAVA_VER=11; DEFAULT_GRADLE=7.6.4 ;;
-            *) JAVA_VER=11; DEFAULT_GRADLE=6.9.4 ;;
+            *) JAVA_VER=17; DEFAULT_GRADLE=8.14.3 ;;
           esac
           if [ -z "${GRADLE_VER:-}" ]; then GRADLE_VER="$DEFAULT_GRADLE"; fi
-
           echo "JAVA_VER=$JAVA_VER" | tee -a "$GITHUB_ENV"
           echo "GRADLE_VER=$GRADLE_VER" | tee -a "$GITHUB_ENV"
           echo "Toolchain: JDK $JAVA_VER, Gradle $GRADLE_VER"
           echo "java_ver=$JAVA_VER" >> "$GITHUB_OUTPUT"
           echo "gradle_ver=$GRADLE_VER" >> "$GITHUB_OUTPUT"
-
       - name: "Setup Java 17 (required by sdkmanager)"
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-
       - name: "Prepare Android cmdline-tools"
         run: |
           set -euo pipefail
@@ -93,12 +81,10 @@ jobs:
             mv "$ANDROID_SDK_ROOT/cmdline-tools/tmp" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           fi
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
-
       - name: "Accept Android SDK licenses (non-fatal)"
         run: |
           set +o pipefail
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
-
       - name: "Detect compileSdk and install SDK packages"
         run: |
           set -euo pipefail
@@ -109,13 +95,11 @@ jobs:
           [ -n "$COMPILE_SDK" ] || COMPILE_SDK=34
           echo "COMPILE_SDK=$COMPILE_SDK" | tee -a "$GITHUB_ENV"
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-${COMPILE_SDK}" "build-tools;34.0.0"
-
       - name: "Setup project JDK"
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: ${{ steps.unpack.outputs.java_ver }}
-
       - name: "Ensure Gradle (wrapper or download)"
         run: |
           set -euo pipefail
@@ -130,7 +114,6 @@ jobs:
             echo "$HOME/gradle-${GRADLE_VER}/bin" | tee -a "$GITHUB_PATH"
             echo "GRADLE_CMD=gradle" | tee -a "$GITHUB_ENV"
           fi
-
       - name: "Detect application module"
         id: detect
         run: |
@@ -148,22 +131,36 @@ jobs:
           echo "APP_DIR=$APP_DIR" | tee -a "$GITHUB_ENV"
           echo "MODULE=$MODULE" | tee -a "$GITHUB_ENV"
           echo "Detected module: $MODULE (dir: $APP_DIR)"
-
       - name: "Build (try release then fallback to debug)"
         run: |
           set -euo pipefail
-          "$GRADLE_CMD" --version | head -n5
-          "$GRADLE_CMD" --no-daemon "$MODULE:clean"
-          if "$GRADLE_CMD" --no-daemon -x lint -x test "$MODULE:assembleRelease"; then
+          LOG="$GITHUB_WORKSPACE/gradle_build.log"
+          : > "$LOG"
+          "$GRADLE_CMD" --version >> "$LOG" 2>&1 || true
+          head -n 6 "$LOG"
+          if "$GRADLE_CMD" --no-daemon -x lint -x test "$MODULE:assembleRelease" >> "$LOG" 2>&1; then
             VARIANT=release
           else
-            echo "assembleRelease failed; trying assembleDebug"
-            "$GRADLE_CMD" --no-daemon -x lint -x test "$MODULE:assembleDebug"
-            VARIANT=debug
+            echo "assembleRelease failed; trying assembleDebug" | tee -a "$LOG"
+            if "$GRADLE_CMD" --no-daemon -x lint -x test "$MODULE:assembleDebug" >> "$LOG" 2>&1; then
+              VARIANT=debug
+            else
+              echo "=== BOTH ASSEMBLE FAILED ===" | tee -a "$LOG"
+              echo "==================== GRADLE ERROR SUMMARY ===================="
+              grep -nE -m 60 'What went wrong|Could not (resolve|download|get)|Unsupported|requires Gradle|Execution failed|AAPT2|Caused by|error: ' "$LOG" || echo "(no keyword matched)"
+              echo "==================== LAST 50 LINES ===================="
+              tail -n 50 "$LOG"
+              exit 1
+            fi
           fi
           echo "VARIANT=$VARIANT" | tee -a "$GITHUB_ENV"
           echo "Built variant: $VARIANT"
-
+      - name: "Upload build log (always)"
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: gradle_build.log
       - name: "Guard: fail if APK too small"
         run: |
           set -euo pipefail
@@ -177,13 +174,11 @@ jobs:
           if [ "$SIZE" -lt 1000000 ]; then
             echo "APK too small"; exit 1
           fi
-
       - name: "Upload APK artifact"
         uses: actions/upload-artifact@v4
         with:
           name: PantumHelper-0.4-${{ env.VARIANT }}
           path: ${{ env.APP_DIR }}/build/outputs/apk/${{ env.VARIANT }}/*.apk
-
       - name: "Create GitHub Release (only when release built)"
         if: ${{ env.VARIANT == 'release' }}
         uses: softprops/action-gh-release@v2
