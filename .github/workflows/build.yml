@@ -22,7 +22,8 @@ jobs:
       - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: "Unpack project.zip if exists"
+      - name: "Unpack project and detect toolchain"
+        id: unpack
         run: |
           set -euo pipefail
           if [ -f project.zip ]; then
@@ -39,12 +40,45 @@ jobs:
             echo "settings.gradle missing at repo root"; exit 1
           fi
 
-      - name: "Setup Java 17"
+          GRADLE_VER=""
+          GW_PROPS="$(find . -name gradle-wrapper.properties -type f | head -n1 || true)"
+          if [ -n "${GW_PROPS:-}" ]; then
+            DIST="$(grep -o 'gradle-[0-9][0-9.]*-[a-z]*\.zip' "$GW_PROPS" | head -n1 || true)"
+            if [ -n "${DIST:-}" ]; then
+              GRADLE_VER="$(echo "$DIST" | sed -E 's/^gradle-([0-9.]+)-.*\.zip$/\1/')"
+            fi
+          fi
+
+          AGP_FULL="$(grep -Rho --include='*.gradle' --include='*.gradle.kts' --include='*.toml' -E 'com.android.tools.build:gradle:[0-9]+(\.[0-9]+)*' . | head -n1 | sed -E 's/.*:gradle://' || true)"
+          if [ -z "${AGP_FULL:-}" ]; then
+            AGP_FULL="$(grep -Rho --include='*.gradle' --include='*.gradle.kts' -E "com.android.application[\"')]* +version +[\"']?[0-9]+(\.[0-9]+)*" . | head -n1 | sed -E "s/.*[^0-9]([0-9]+(\.[0-9]+)*)$/\1/" || true)"
+          fi
+          if [ -z "${AGP_FULL:-}" ]; then
+            AGP_FULL="$(grep -Rho --include='*.toml' -E "agp *= *[\"']?[0-9]+(\.[0-9]+)*" . | head -n1 | sed -E "s/.*[^0-9.]([0-9]+(\.[0-9]+)*).*/\1/" || true)"
+          fi
+          echo "Detected AGP: ${AGP_FULL:-none}"
+
+          AGP_MAJOR="${AGP_FULL%%.*}"
+          if [ -z "${AGP_MAJOR:-}" ]; then AGP_MAJOR=8; fi
+          case "$AGP_MAJOR" in
+            9) JAVA_VER=17; DEFAULT_GRADLE=9.0.0 ;;
+            8) JAVA_VER=17; DEFAULT_GRADLE=8.14.3 ;;
+            7) JAVA_VER=11; DEFAULT_GRADLE=7.6.4 ;;
+            *) JAVA_VER=11; DEFAULT_GRADLE=6.9.4 ;;
+          esac
+          if [ -z "${GRADLE_VER:-}" ]; then GRADLE_VER="$DEFAULT_GRADLE"; fi
+
+          echo "JAVA_VER=$JAVA_VER" | tee -a "$GITHUB_ENV"
+          echo "GRADLE_VER=$GRADLE_VER" | tee -a "$GITHUB_ENV"
+          echo "Toolchain: JDK $JAVA_VER, Gradle $GRADLE_VER"
+          echo "java_ver=$JAVA_VER" >> "$GITHUB_OUTPUT"
+          echo "gradle_ver=$GRADLE_VER" >> "$GITHUB_OUTPUT"
+
+      - name: "Setup Java"
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
-          cache: gradle
+          java-version: ${{ steps.unpack.outputs.java_ver }}
 
       - name: "Prepare Android cmdline-tools"
         run: |
@@ -65,7 +99,7 @@ jobs:
           set +o pipefail
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
 
-      - name: "Detect compileSdk/buildTools and install"
+      - name: "Detect compileSdk and install SDK packages"
         run: |
           set -euo pipefail
           COMPILE_SDK="$(grep -Rho --include='*.gradle*' '\bcompileSdk\s*=\s*[0-9]+' . | tail -n1 | awk -F= '{print $2}' | tr -d ' ' || true)"
@@ -73,12 +107,23 @@ jobs:
             COMPILE_SDK="$(grep -Rho --include='*.gradle*' '\bcompileSdkVersion\s*[0-9]+' . | tail -n1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
           fi
           [ -n "$COMPILE_SDK" ] || COMPILE_SDK=34
-          BUILD_TOOLS="$(grep -Rho --include='*.gradle*' 'buildToolsVersion\s*["'\''][0-9.]+["'\'']' . | tail -n1 | sed -E 's/.*["'\'']([0-9.]+)["'\''].*/\1/' || true)"
-          if [ -z "$BUILD_TOOLS" ]; then BUILD_TOOLS="34.0.0"; fi
           echo "COMPILE_SDK=$COMPILE_SDK" | tee -a "$GITHUB_ENV"
-          echo "BUILD_TOOLS=$BUILD_TOOLS" | tee -a "$GITHUB_ENV"
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" "platforms;android-${COMPILE_SDK}" "build-tools;${BUILD_TOOLS}"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-${COMPILE_SDK}" "build-tools;34.0.0"
+
+      - name: "Ensure Gradle (wrapper or download)"
+        run: |
+          set -euo pipefail
+          if [ -f gradlew ]; then chmod +x gradlew; fi
+          if [ -x ./gradlew ]; then
+            echo "Using project gradlew wrapper"
+            echo "GRADLE_CMD=./gradlew" | tee -a "$GITHUB_ENV"
+          else
+            echo "gradlew missing; downloading Gradle ${GRADLE_VER}"
+            curl -sSL -o /tmp/gradle.zip "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip"
+            unzip -q /tmp/gradle.zip -d "$HOME"
+            echo "$HOME/gradle-${GRADLE_VER}/bin" | tee -a "$GITHUB_PATH"
+            echo "GRADLE_CMD=gradle" | tee -a "$GITHUB_ENV"
+          fi
 
       - name: "Detect application module"
         id: detect
@@ -89,8 +134,11 @@ jobs:
             echo "No module applies com.android.application (only library? then no APK)"; exit 1
           fi
           APP_DIR="$(dirname "$FILE")"
-          MODULE=":${APP_DIR#./}"
-          MODULE="${MODULE//\//:}"
+          if [ "$APP_DIR" = "." ]; then
+            MODULE=":"
+          else
+            MODULE=":${APP_DIR#./}"
+          fi
           echo "APP_DIR=$APP_DIR" | tee -a "$GITHUB_ENV"
           echo "MODULE=$MODULE" | tee -a "$GITHUB_ENV"
           echo "Detected module: $MODULE (dir: $APP_DIR)"
@@ -98,13 +146,13 @@ jobs:
       - name: "Build (try release then fallback to debug)"
         run: |
           set -euo pipefail
-          ./gradlew --version
-          ./gradlew --no-daemon "$MODULE:clean"
-          if ./gradlew --no-daemon -x lint -x test "$MODULE:assembleRelease"; then
+          "$GRADLE_CMD" --version | head -n5
+          "$GRADLE_CMD" --no-daemon "$MODULE:clean"
+          if "$GRADLE_CMD" --no-daemon -x lint -x test "$MODULE:assembleRelease"; then
             VARIANT=release
           else
             echo "assembleRelease failed; trying assembleDebug"
-            ./gradlew --no-daemon -x lint -x test "$MODULE:assembleDebug"
+            "$GRADLE_CMD" --no-daemon -x lint -x test "$MODULE:assembleDebug"
             VARIANT=debug
           fi
           echo "VARIANT=$VARIANT" | tee -a "$GITHUB_ENV"
