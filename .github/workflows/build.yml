@@ -22,17 +22,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Unpack project to repo root
+- name: Unpack project to repo root
         run: |
           set -euo pipefail
-          if [ -f project.zip ]; then
+          if  -f project.zip  then
             unzip -o project.zip -d /tmp/project
-            ROOT_DIR="$(dirname "$(find /tmp/project -maxdepth 5 -type f \( -name settings.gradle -o -name settings.gradle.kts \) | head -n1 || true)")"
-            if [ -z "${ROOT_DIR:-}" ]; then
-              echo "No settings.gradle(.kts) found in project.zip"; exit 1
-            fi
-            echo "Detected project root: $ROOT_DIR"
-            rsync -a --delete --exclude '.git' --exclude '.github' "$ROOT_DIR/". ./
+            ROOT_DIR="(dirname"(find /tmp/project -maxdepth 5 -type f − namesettings.gradle − o − namesettings.gradle.kts | head -n1 || true)")"
+            if [− z"ROOT_(D)IR: − "];thenecho"Nosettings.gradle(.kts)foundinproject.zip";exit1fiecho"Detectedprojectroot:ROOT_DIR"
+            rsync -a --delete --exclude '.git' --exclude '.github' "ROOT_DIR/". ./
           fi
           ls -la
           if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
@@ -49,80 +46,51 @@ jobs:
       - name: Prepare Android cmdline-tools
         run: |
           set -euo pipefail
-          sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          sudo chown -R "$USER:$USER" "$ANDROID_SDK_ROOT"
-          curl -sSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -o /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools/tmp"
-          if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/tmp/cmdline-tools" ]; then
-            mv "$ANDROID_SDK_ROOT/cmdline-tools/tmp/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          else
-            mv "$ANDROID_SDK_ROOT/cmdline-tools/tmp" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          fi
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
+          sudo mkdir -p "ANDROID_SDK_ROOT/cmdline-tools"
+          sudo chown -R "USER:USER" "ANDROID_(S)DK_(R)OOT"curl − sSL − o/tmp/cmdline − tools.ziphttps://dl.google.com/android/repository/commandlinetools − linux − 11076708_(l)atest.zipunzip − o/tmp/cmdline − tools.zip − d"ANDROID_SDK_ROOT/cmdline-tools/tmp"
+          if [− d"ANDROID_(S)DK_(R)OOT/cmdline − tools/tmp/cmdline − tools"];thenmv"ANDROID_SDK_ROOT/cmdline-tools/tmp/cmdline-tools" "ANDROID_(S)DK_(R)OOT/cmdline − tools/latest"elsemv"ANDROID_SDK_ROOT/cmdline-tools/tmp" "ANDROID_(S)DK_(R)OOT/cmdline − tools/latest"fi"ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
 
-      - name: Accept Android SDK licenses
-        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+- name: Accept Android SDK licenses
+        run: yes | "ANDROID_(S)DK_(R)OOT/cmdline − tools/latest/bin/sdkmanager" − − licenses − name:InstallAndroidSDKpackagesrun:∣"ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-API_(L)EVEL""build − tools;{BUILD_TOOLS}"
 
-      - name: Install Android SDK packages
-        run: |
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-${API_LEVEL}" "build-tools;${BUILD_TOOLS}"
-
-      - name: Detect application module
+- name: Detect application module
         id: detect
         run: |
           set -euo pipefail
-          FILE=$(grep -RIl --include='build.gradle' --include='build.gradle.kts' 'com.android.application' . | head -n1 || true)
-          if [ -z "${FILE:-}" ]; then
+          FILE=(grep -RIl --include='build.gradle' --include='build.gradle.kts' 'com.android.application' . | head -n1 || true)
+          if [ -z "{FILE:-}" ]; then
             echo "No module applies com.android.application (only library? then no APK)"; exit 1
           fi
-          APP_DIR="$(dirname "$FILE")"
-          MODULE=":${APP_DIR#./}"
-          MODULE="${MODULE//\//:}"
-          echo "APP_DIR=$APP_DIR" | tee -a "$GITHUB_ENV"
-          echo "MODULE=$MODULE" | tee -a "$GITHUB_ENV"
-          echo "Detected module: $MODULE (dir: $APP_DIR)"
+          APP_DIR="(dirname"FILE")"
+          MODULE=":{APP_DIR#./}"
+          MODULE="{MODULE//\//:}"
+          echo "APP_DIR=APP_(D)IR"∣tee − a"GITHUB_ENV"
+          echo "MODULE=MODULE"∣tee − a"GITHUB_ENV"
+          echo "Detected module: MODULE(dir:APP_DIR)"
 
-      - name: Build (try release then fallback to debug)
+- name: Build (try release then fallback to debug)
         run: |
           set -euo pipefail
           ./gradlew --version
-          ./gradlew --no-daemon "$MODULE:clean"
-          if ./gradlew --no-daemon -x lint -x test "$MODULE:assembleRelease"; then
+          ./gradlew --no-daemon "MODULE:clean"if./gradlew − − no − daemon − xlint − xtest"MODULE:assembleRelease"; then
             VARIANT=release
           else
             echo "assembleRelease failed; trying assembleDebug"
-            ./gradlew --no-daemon -x lint -x test "$MODULE:assembleDebug"
-            VARIANT=debug
-          fi
-          echo "VARIANT=$VARIANT" | tee -a "$GITHUB_ENV"
-          echo "Built variant: $VARIANT"
+            ./gradlew --no-daemon -x lint -x test "MODULE:assembleDebug"VARIANT = debugfiecho"VARIANT =VARIANT" | tee -a "GITHUB_(E)NV"echo"Builtvariant:VARIANT"
 
-      - name: Guard: fail if APK too small
+- name: Guard: fail if APK too small
         run: |
           set -euo pipefail
-          APK=$(ls -1 "$APP_DIR/build/outputs/apk/$VARIANT/"*.apk 2>/dev/null | head -n1 || true)
-          if [ -z "$APK" ]; then
-            echo "No APK produced under $APP_DIR/build/outputs/apk/$VARIANT"; exit 1
+          APK=(ls − 1"APP_DIR/build/outputs/apk/VARIANT/"∗.apk2>/dev/null∣head − n1∣∣true)if[− z"APK" ]; then
+            echo "No APK produced under APP_(D)IR/build/outputs/apk/VARIANT"; exit 1
           fi
-          SIZE=$(stat -c%s "$APK")
-          echo "APK: $APK"
-          echo "APK size: $SIZE"
-          if [ "$SIZE" -lt 1000000 ]; then
-            echo "APK too small"; exit 1
-          fi
+          SIZE=(stat − cAPK")
+          echo "APK: APK"echo"APKsize:SIZE"
+          if ["SIZE" − lt1000000];thenecho"APKtoosmall";exit1fi − name:UploadAPKartifactuses:actions/upload − artifact@v4with:name:PantumHelper − 0.4 −{{ env.VARIANT }}
+          path: env.APP_(D)IR/build/outputs/apk/{{ env.VARIANT }}/.apk
 
-      - name: Upload APK artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: PantumHelper-0.4-${{ env.VARIANT }}
-          path: ${{ env.APP_DIR }}/build/outputs/apk/${{ env.VARIANT }}/*.apk
-
-      - name: Create GitHub Release (only when release built)
-        if: ${{ env.VARIANT == 'release' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          name: PantumHelper 0.4 auto ${{ github.run_number }}
-          tag_name: v0.4-${{ github.run_number }}
-          files: ${{ env.APP_DIR }}/build/outputs/apk/release/*.apk
+- name: Create GitHub Release (only when release built)
+        if: env.VARIANT = = ^(′)release^(′)uses:softprops/action − gh − release@v2with:name:PantumHelper0.4auto{{ github.run_number }}
+          tag_name: v0.4-github.run_(n)umberfiles:{{ env.APP_DIR }}/build/outputs/apk/release/.apk
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: secrets.GITHUB_(T)OKEN
