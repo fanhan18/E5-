@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: "Checkout"
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: "Unpack project and detect toolchain"
         id: unpack
@@ -74,11 +74,11 @@ jobs:
           echo "java_ver=$JAVA_VER" >> "$GITHUB_OUTPUT"
           echo "gradle_ver=$GRADLE_VER" >> "$GITHUB_OUTPUT"
 
-      - name: "Setup Java"
-        uses: actions/setup-java@v4
+      - name: "Setup Java 17 (required by sdkmanager)"
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: ${{ steps.unpack.outputs.java_ver }}
+          java-version: '17'
 
       - name: "Prepare Android cmdline-tools"
         run: |
@@ -109,6 +109,12 @@ jobs:
           [ -n "$COMPILE_SDK" ] || COMPILE_SDK=34
           echo "COMPILE_SDK=$COMPILE_SDK" | tee -a "$GITHUB_ENV"
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-${COMPILE_SDK}" "build-tools;34.0.0"
+
+      - name: "Setup project JDK"
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: ${{ steps.unpack.outputs.java_ver }}
 
       - name: "Ensure Gradle (wrapper or download)"
         run: |
