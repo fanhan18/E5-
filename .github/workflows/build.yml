@@ -19,10 +19,10 @@ jobs:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
-      - name: Checkout
+      - name: "Checkout"
         uses: actions/checkout@v4
 
-      - name: Unpack project.zip if exists
+      - name: "Unpack project.zip if exists"
         run: |
           set -euo pipefail
           if [ -f project.zip ]; then
@@ -39,14 +39,14 @@ jobs:
             echo "settings.gradle missing at repo root"; exit 1
           fi
 
-      - name: Setup Java 17
+      - name: "Setup Java 17"
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
-      - name: Prepare Android cmdline-tools
+      - name: "Prepare Android cmdline-tools"
         run: |
           set -euo pipefail
           sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
@@ -60,32 +60,27 @@ jobs:
           fi
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
 
-      - name: Accept Android SDK licenses (non-fatal)
+      - name: "Accept Android SDK licenses (non-fatal)"
         run: |
           set +o pipefail
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
 
-      - name: Detect compileSdk/buildTools and install
+      - name: "Detect compileSdk/buildTools and install"
         run: |
           set -euo pipefail
-          # Detect compileSdk
           COMPILE_SDK="$(grep -Rho --include='*.gradle*' '\bcompileSdk\s*=\s*[0-9]+' . | tail -n1 | awk -F= '{print $2}' | tr -d ' ' || true)"
           if [ -z "$COMPILE_SDK" ]; then
             COMPILE_SDK="$(grep -Rho --include='*.gradle*' '\bcompileSdkVersion\s*[0-9]+' . | tail -n1 | sed -E 's/[^0-9]*([0-9]+).*/\1/' || true)"
           fi
           [ -n "$COMPILE_SDK" ] || COMPILE_SDK=34
-
-          # Detect buildToolsVersion
-          BUILD_TOOLS="$(grep -Rho --include='*.gradle*' 'buildToolsVersion\\s*[\"'\\''][0-9.]+[\"'\\'']' . | tail -n1 | sed -E 's/.*[\"'\\'']([0-9.]+)[\"'\\''].*/\1/' || true)"
+          BUILD_TOOLS="$(grep -Rho --include='*.gradle*' 'buildToolsVersion\s*["'\''][0-9.]+["'\'']' . | tail -n1 | sed -E 's/.*["'\'']([0-9.]+)["'\''].*/\1/' || true)"
           if [ -z "$BUILD_TOOLS" ]; then BUILD_TOOLS="34.0.0"; fi
-
           echo "COMPILE_SDK=$COMPILE_SDK" | tee -a "$GITHUB_ENV"
           echo "BUILD_TOOLS=$BUILD_TOOLS" | tee -a "$GITHUB_ENV"
-
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
             "platform-tools" "platforms;android-${COMPILE_SDK}" "build-tools;${BUILD_TOOLS}"
 
-      - name: Detect application module
+      - name: "Detect application module"
         id: detect
         run: |
           set -euo pipefail
@@ -100,7 +95,7 @@ jobs:
           echo "MODULE=$MODULE" | tee -a "$GITHUB_ENV"
           echo "Detected module: $MODULE (dir: $APP_DIR)"
 
-      - name: Build (try release then fallback to debug)
+      - name: "Build (try release then fallback to debug)"
         run: |
           set -euo pipefail
           ./gradlew --version
@@ -115,7 +110,7 @@ jobs:
           echo "VARIANT=$VARIANT" | tee -a "$GITHUB_ENV"
           echo "Built variant: $VARIANT"
 
-      - name: Guard: fail if APK too small
+      - name: "Guard: fail if APK too small"
         run: |
           set -euo pipefail
           APK=$(ls -1 "$APP_DIR/build/outputs/apk/$VARIANT/"*.apk 2>/dev/null | head -n1 || true)
@@ -129,13 +124,13 @@ jobs:
             echo "APK too small"; exit 1
           fi
 
-      - name: Upload APK artifact
+      - name: "Upload APK artifact"
         uses: actions/upload-artifact@v4
         with:
           name: PantumHelper-0.4-${{ env.VARIANT }}
           path: ${{ env.APP_DIR }}/build/outputs/apk/${{ env.VARIANT }}/*.apk
 
-      - name: Create GitHub Release (only when release built)
+      - name: "Create GitHub Release (only when release built)"
         if: ${{ env.VARIANT == 'release' }}
         uses: softprops/action-gh-release@v2
         with:
