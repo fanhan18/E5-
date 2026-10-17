@@ -1,4 +1,3 @@
-
 name: build-apk
 
 on:
@@ -12,6 +11,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    defaults:
+      run:
+        shell: bash
     env:
       ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
       API_LEVEL: 34
@@ -21,7 +23,6 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Unpack project to repo root
-        shell: bash
         run: |
           set -euo pipefail
           if [ -f project.zip ]; then
@@ -34,21 +35,22 @@ jobs:
             rsync -a --delete --exclude '.git' --exclude '.github' "$ROOT_DIR/". ./
           fi
           ls -la
-          test -f settings.gradle -o -f settings.gradle.kts || (echo "settings.gradle missing at repo root"; exit 1)
+          if [ ! -f settings.gradle ] && [ ! -f settings.gradle.kts ]; then
+            echo "settings.gradle missing at repo root"; exit 1
+          fi
 
       - name: Setup Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
           cache: gradle
 
       - name: Prepare Android cmdline-tools
-        shell: bash
         run: |
           set -euo pipefail
           sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-          sudo chown -R $USER:$USER "$ANDROID_SDK_ROOT"
+          sudo chown -R "$USER:$USER" "$ANDROID_SDK_ROOT"
           curl -sSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -o /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools/tmp"
           if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/tmp/cmdline-tools" ]; then
@@ -67,7 +69,6 @@ jobs:
 
       - name: Detect application module
         id: detect
-        shell: bash
         run: |
           set -euo pipefail
           FILE=$(grep -RIl --include='build.gradle' --include='build.gradle.kts' 'com.android.application' . | head -n1 || true)
@@ -77,12 +78,11 @@ jobs:
           APP_DIR="$(dirname "$FILE")"
           MODULE=":${APP_DIR#./}"
           MODULE="${MODULE//\//:}"
-          echo "APP_DIR=$APP_DIR" | tee -a $GITHUB_ENV
-          echo "MODULE=$MODULE" | tee -a $GITHUB_ENV
+          echo "APP_DIR=$APP_DIR" | tee -a "$GITHUB_ENV"
+          echo "MODULE=$MODULE" | tee -a "$GITHUB_ENV"
           echo "Detected module: $MODULE (dir: $APP_DIR)"
 
       - name: Build (try release then fallback to debug)
-        shell: bash
         run: |
           set -euo pipefail
           ./gradlew --version
@@ -94,19 +94,22 @@ jobs:
             ./gradlew --no-daemon -x lint -x test "$MODULE:assembleDebug"
             VARIANT=debug
           fi
-          echo "VARIANT=$VARIANT" | tee -a $GITHUB_ENV
+          echo "VARIANT=$VARIANT" | tee -a "$GITHUB_ENV"
           echo "Built variant: $VARIANT"
 
       - name: Guard: fail if APK too small
-        shell: bash
         run: |
           set -euo pipefail
           APK=$(ls -1 "$APP_DIR/build/outputs/apk/$VARIANT/"*.apk 2>/dev/null | head -n1 || true)
-          [ -n "$APK" ] || (echo "No APK produced under $APP_DIR/build/outputs/apk/$VARIANT"; exit 1)
+          if [ -z "$APK" ]; then
+            echo "No APK produced under $APP_DIR/build/outputs/apk/$VARIANT"; exit 1
+          fi
           SIZE=$(stat -c%s "$APK")
           echo "APK: $APK"
           echo "APK size: $SIZE"
-          [ "$SIZE" -ge 1000000 ] || (echo "APK too small"; exit 1)
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "APK too small"; exit 1
+          fi
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
