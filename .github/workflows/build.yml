@@ -1,10 +1,13 @@
 name: build-apk
+
 on:
   push:
   workflow_dispatch:
+
 permissions:
   contents: write
   actions: write
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -13,16 +16,21 @@ jobs:
       API_LEVEL: 34
       BUILD_TOOLS: 34.0.0
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Unpack project from zip (optional)
         run: |
           if [ -f project.zip ]; then
             unzip -o project.zip -d /tmp/project
-            rsync -a --delete /tmp/project/ ./
+            if [ -d /tmp/project/project ]; then SRC="/tmp/project/project"; else SRC="/tmp/project"; fi
+            rsync -a --delete --exclude '.git' --exclude '.github' "$SRC/". ./
+            ls -la
+            test -f settings.gradle -o -f settings.gradle.kts || (echo "settings.gradle missing"; exit 1)
+            test -f app/build.gradle -o -f app/build.gradle.kts || (echo "app/build.gradle missing"; exit 1)
           fi
 
-      - name: Set up Java 17
+      - name: Setup Java 17
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -34,30 +42,35 @@ jobs:
           sudo mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           sudo chown -R $USER:$USER "$ANDROID_SDK_ROOT"
           curl -sSL -o /tmp/cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          unzip -q -o /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-          if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/latest/cmdline-tools" ]; then
-            mv "$ANDROID_SDK_ROOT/cmdline-tools/latest/cmdline-tools/"* "$ANDROID_SDK_ROOT/cmdline-tools/latest/"
-            rmdir "$ANDROID_SDK_ROOT/cmdline-tools/latest/cmdline-tools" || true
+          unzip -o /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools/tmp"
+          if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/tmp/cmdline-tools" ]; then
+            mv "$ANDROID_SDK_ROOT/cmdline-tools/tmp/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          else
+            mv "$ANDROID_SDK_ROOT/cmdline-tools/tmp" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
           fi
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --version
 
       - name: Accept Android SDK licenses
-        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+        run: |
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
 
       - name: Install Android SDK packages
         run: |
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platform-tools" \
-            "platforms;android-${API_LEVEL}" \
-            "build-tools;${BUILD_TOOLS}"
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platform-tools" "platforms;android-${API_LEVEL}" "build-tools;${BUILD_TOOLS}"
 
-      - name: Build with Gradle 8.7
+      - name: Build with Gradle 8.7 (release)
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.7
           arguments: assembleRelease
+
+      - name: Guard: fail if APK too small
+        run: |
+          APK=$(ls -1 app/build/outputs/apk/release/*.apk 2>/dev/null | head -n1 || true)
+          [ -n "$APK" ] || (echo "No release APK produced"; exit 1)
+          SIZE=$(stat -c%s "$APK")
+          echo "APK size: $SIZE"
+          [ "$SIZE" -ge 1000000 ] || (echo "APK too small"; exit 1)
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
@@ -73,3 +86,4 @@ jobs:
           files: app/build/outputs/apk/release/*.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
